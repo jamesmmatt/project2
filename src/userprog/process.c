@@ -449,7 +449,7 @@ load_segment (struct file *file, off_t ofs, uint8_t *upage,
 
 /* Create a minimal stack by mapping a zeroed page at the top of
    user virtual memory. */
-   /*Added file_name as an argument */
+   /*Added file_name as an argument. Gave set up stack access to the file name */
 static bool
 setup_stack (void **esp, char * file_name) // added file_name here as well
 {
@@ -469,6 +469,59 @@ setup_stack (void **esp, char * file_name) // added file_name here as well
     }
 
   //need stuff here
+  char *token; //added this
+  char *save_token_pointer; //added this
+  int arg_constant = 0,x; //added this: variable declaration and initialization for compiler
+  char * file_name_copy = malloc(strlen(file_name) + 1); //added this: makes space for filename copy
+  strlcpy(file_name_copy, file_name, strlen(file_name)); //added this: copies file_name into file_name_copy
+
+  // added this for loop. loops through each token and increments the arg per token
+  for (token = strtok_r(file_name, " ", &save_token_pointer); token != NULL; token = strtok_r(NULL, " ", &save_token_pointer))
+  {
+    arg_constant++;
+  }
+
+  int *arg_var = calloc(arg_constant,sizeof(int)); // added this: allocates arg_var to the amount of arg_constant. uses calloc instead of malloc to set allocated memory to zero
+  int i = 0; //for loop gave me error so i added this
+  // added this for loop. loops through each token and sets the arg_var item to the interrupted thread. need int i to go thru arg_var
+  for (token = strtok_r(file_name, " ", &save_token_pointer), i = 0; token != NULL; token = strtok_r(NULL, " ", &save_token_pointer), i++)
+  {
+    *esp -= strlen(token) + 1; //decrement here bc stack
+    memcpy(*esp, token, strlen(token) + 1); //copies the length of tokens plus one from the token memory area to the interrupted threads area
+    hex_dump(*esp, *esp, PHYS_BASE-(*esp), true); /* Prints files specified on command line to the console in hex. */
+    arg_var[i] = *esp;
+  }
+
+  // added this: writess the necessary amount of 0's to align to 4 bytes
+  while((int) *esp %4 != 0) 
+  {
+    *esp -= sizeof(char);
+    char allign = 0;
+    memcpy(*esp, &allign , sizeof(char));
+  }
+
+  int zero_mem = 0; // 0 to be used in the memcpy functions
+
+  *esp -= sizeof(int);
+  memcpy(*esp, &zero_mem, sizeof(int));
+
+  //added this
+  for(i = arg_constant - 1; i >= 0 ; i--)
+  {
+    *esp -= sizeof(int);
+    memcpy(*esp, &arg_var[i] , sizeof(int));
+  }
+
+
+  int pt = *esp;
+  *esp-=sizeof(int);
+  memcpy(*esp, &pt , sizeof(int));
+  *esp -= sizeof(int);
+  memcpy(*esp , &arg_constant , sizeof(int)); //copies the size of int from the memory area of the constant arg to the interrupted threads
+  *esp -= sizeof(int);
+  memcpy(*esp, &zero_mem, sizeof(int)); //copies the size of int from the memory area of the zero_mem to the interrupted threads
+
+  hex_dump(*esp, *esp, PHYS_BASE - (*esp), true);  /* Prints files specified on command line to the console in hex. */
 
   return success;
 }
