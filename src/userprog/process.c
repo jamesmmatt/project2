@@ -25,6 +25,9 @@ static bool load (const char *cmdline, void (**eip) (void), void **esp);
    FILENAME.  The new thread may be scheduled (and may even exit)
    before process_execute() returns.  Returns the new process's
    thread id, or TID_ERROR if the thread cannot be created. */
+
+  /*Changed this: extrats the executable name from file_name and
+  instead of passign the file name we pass the executable name */
 tid_t
 process_execute (const char *file_name) 
 {
@@ -37,6 +40,11 @@ process_execute (const char *file_name)
   if (fn_copy == NULL)
     return TID_ERROR;
   strlcpy (fn_copy, file_name, PGSIZE);
+
+  /* Added these two lines below. Extracts tokens from file_name
+  and puts them in save_pointer*/
+  char *save_token_pointer;
+  file_name = strtok_r(file_name, " ", &save_token_pointer);
 
   /* Create a new thread to execute FILE_NAME. */
   tid = thread_create (file_name, PRI_DEFAULT, start_process, fn_copy);
@@ -86,9 +94,12 @@ start_process (void *file_name_)
    This function will be implemented in problem 2-2.  For now, it
    does nothing. */
 int
-process_wait (tid_t child_tid UNUSED) 
+process_wait (tid_t child_tid) 
 {
-  return -1;
+  // temp implementation
+  while(true) {
+    thread_yield();
+  }
 }
 
 /* Free the current process's resources. */
@@ -97,6 +108,9 @@ process_exit (void)
 {
   struct thread *cur = thread_current ();
   uint32_t *pd;
+
+  int exit_code = 0;
+  printf("%s: exit(%d)\n",cur->name,exit_code);
 
   /* Destroy the current process's page directory and switch back
      to the kernel-only page directory. */
@@ -195,7 +209,8 @@ struct Elf32_Phdr
 #define PF_W 2          /* Writable. */
 #define PF_R 4          /* Readable. */
 
-static bool setup_stack (void **esp);
+// added * cmdline here
+static bool setup_stack (void **esp, char * cmdline);
 static bool validate_segment (const struct Elf32_Phdr *, struct file *);
 static bool load_segment (struct file *file, off_t ofs, uint8_t *upage,
                           uint32_t read_bytes, uint32_t zero_bytes,
@@ -222,7 +237,15 @@ load (const char *file_name, void (**eip) (void), void **esp)
   process_activate ();
 
   /* Open executable file. */
-  file = filesys_open (file_name);
+  /*added this */
+  char *file_name_copy = malloc (strlen(file_name) + 1); //makes space for the file name copy
+  strlcpy(file_name_copy, file_name, strlen(file_name)); //copies the file name into file name copy 
+
+  char * save_pointer; // saved pointer variable initialization
+  file_name_copy = strtok_r(file_name_copy, " ", &save_pointer); // strips the takens from file_name_copy and puts it into the saved pointer
+  file = filesys_open (file_name_copy); // use to call filesys_open on file_name now its file_name_copy
+
+
   if (file == NULL) 
     {
       printf ("load: %s: open failed\n", file_name);
@@ -302,7 +325,7 @@ load (const char *file_name, void (**eip) (void), void **esp)
     }
 
   /* Set up stack. */
-  if (!setup_stack (esp))
+  if (!setup_stack (esp, file_name)) //added file_name parameter here
     goto done;
 
   /* Start address. */
@@ -426,8 +449,9 @@ load_segment (struct file *file, off_t ofs, uint8_t *upage,
 
 /* Create a minimal stack by mapping a zeroed page at the top of
    user virtual memory. */
+   /*Added file_name as an argument */
 static bool
-setup_stack (void **esp) 
+setup_stack (void **esp, char * file_name) // added file_name here as well
 {
   uint8_t *kpage;
   bool success = false;
@@ -437,10 +461,15 @@ setup_stack (void **esp)
     {
       success = install_page (((uint8_t *) PHYS_BASE) - PGSIZE, kpage, true);
       if (success)
-        *esp = PHYS_BASE;
+        // *esp = PHYS_BASE;
+        *esp = PHYS_BASE - 12; //said to do this for argument passing
+
       else
         palloc_free_page (kpage);
     }
+
+  //need stuff here
+
   return success;
 }
 
