@@ -462,7 +462,7 @@ setup_stack (void **esp, char * file_name) // added file_name here as well
       success = install_page (((uint8_t *) PHYS_BASE) - PGSIZE, kpage, true);
       if (success)
         // *esp = PHYS_BASE;
-        *esp = PHYS_BASE - 12; //said to do this for argument passing
+        *esp = PHYS_BASE; //said to do this for argument passing
 
       else
         palloc_free_page (kpage);
