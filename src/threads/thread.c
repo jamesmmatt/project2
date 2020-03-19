@@ -26,7 +26,7 @@ static struct list ready_list;
 
 /* List of all processes.  Processes are added to this list
    when they are first scheduled and removed when they exit. */
-static struct list all_list;
+struct list all_list;
 
 /* Idle thread. */
 static struct thread *idle_thread;
@@ -36,6 +36,9 @@ static struct thread *initial_thread;
 
 /* Lock used by allocate_tid(). */
 static struct lock tid_lock;
+
+// added this lock
+struct lock filesystem_lock;
 
 /* Stack frame for kernel_thread(). */
 struct kernel_thread_frame 
@@ -89,9 +92,12 @@ thread_init (void)
 {
   ASSERT (intr_get_level () == INTR_OFF);
 
+
   lock_init (&tid_lock);
   list_init (&ready_list);
   list_init (&all_list);
+  //added this lock init
+  lock_init(&filesystem_lock);
 
   /* Set up a thread structure for the running thread. */
   initial_thread = running_thread ();
@@ -182,6 +188,13 @@ thread_create (const char *name, int priority,
   /* Initialize thread. */
   init_thread (t, name, priority);
   tid = t->tid = allocate_tid ();
+
+    // added this part of the thread initialization for the child thread
+  struct child* child_thread = malloc(sizeof(*child_thread));
+  child_thread->tid = tid;
+  child_thread->exit_error = t->exit_error;
+  child_thread->have_used = false;
+  list_push_back(&running_thread()->child_proc, &child_thread->elem);
 
   /* Stack frame for kernel_thread(). */
   kf = alloc_frame (t, sizeof *kf);
@@ -451,8 +464,6 @@ is_thread (struct thread *t)
 static void
 init_thread (struct thread *t, const char *name, int priority)
 {
-  enum intr_level old_level;
-
   ASSERT (t != NULL);
   ASSERT (PRI_MIN <= priority && priority <= PRI_MAX);
   ASSERT (name != NULL);
@@ -463,10 +474,19 @@ init_thread (struct thread *t, const char *name, int priority)
   t->stack = (uint8_t *) t + PGSIZE;
   t->priority = priority;
   t->magic = THREAD_MAGIC;
-
-  old_level = intr_disable ();
+  list_init (&t->child_proc);
+  // sets parent thread to running_thread
+  t->parent_thread = running_thread();
+  // added these as well
+  list_init (&t->files);
+  // fd is file descriptor
+  t->fd_count = 2;
+  /*added this section of child thread inits */
+  lock_init(&t->child_lock);
+  cond_init(&t->child_cond);
+  t->waitingon = 0;
+  t->self = NULL;
   list_push_back (&all_list, &t->allelem);
-  intr_set_level (old_level);
 }
 
 /* Allocates a SIZE-byte frame at the top of thread T's stack and
@@ -563,6 +583,17 @@ schedule (void)
   if (cur != next)
     prev = switch_threads (cur, next);
   thread_schedule_tail (prev);
+}
+
+// added these lock acquires
+void acquire_filesystem_lock() 
+{
+  lock_acquire(&filesystem_lock);  
+}
+
+void release_filesystem_lock() 
+{
+  lock_release(&filesystem_lock);  
 }
 
 /* Returns a tid to use for a new thread. */

@@ -4,6 +4,9 @@
 #include <debug.h>
 #include <list.h>
 #include <stdint.h>
+// added these includes
+#include <kernel/list.h>
+#include <threads/synch.h>
 
 /* States in a thread's life cycle. */
 enum thread_status
@@ -88,7 +91,21 @@ struct thread
     char name[16];                      /* Name (for debugging purposes). */
     uint8_t *stack;                     /* Saved stack pointer. */
     int priority;                       /* Priority. */
+    struct list_elem elem;              /* List element. */
     struct list_elem allelem;           /* List element for all threads list. */
+
+    // added these fields in init_thread
+    bool exit;                           /*checks if ready to exit*/
+    struct thread* parent_thread;       /*The parent thread */
+    struct list child_proc;
+    struct file *self;
+    struct lock child_lock;
+    struct condition child_cond;
+    int waitingon;
+    int exit_error;                     /*the exit error */
+    struct list files;                  /* list of files */
+    int fd_count;                       /*the file discriptor coutner */
+
 
     /* Shared between thread.c and synch.c. */
 
@@ -100,6 +117,13 @@ struct thread
     /* Owned by thread.c. */
     unsigned magic;                     /* Detects stack overflow. */
   };
+
+struct child {
+  int tid;
+  struct list_elem elem;
+  bool have_used;
+  int exit_error;
+};
 
 /* If false (default), use round-robin scheduler.
    If true, use multi-level feedback queue scheduler.

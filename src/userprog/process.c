@@ -18,8 +18,11 @@
 #include "threads/thread.h"
 #include "threads/vaddr.h"
 
+
 static thread_func start_process NO_RETURN;
 static bool load (const char *cmdline, void (**eip) (void), void **esp);
+
+extern struct list all_list;
 
 /* Starts a new thread running a user program loaded from
    FILENAME.  The new thread may be scheduled (and may even exit)
@@ -31,6 +34,8 @@ static bool load (const char *cmdline, void (**eip) (void), void **esp);
 tid_t
 process_execute (const char *file_name) 
 {
+  //added this
+  char *f_name;
   char *fn_copy;
   tid_t tid;
 
@@ -44,10 +49,14 @@ process_execute (const char *file_name)
   /* Added these two lines below. Extracts tokens from file_name
   and puts them in save_pointer*/
   char *save_token_pointer;
-  file_name = strtok_r(file_name, " ", &save_token_pointer);
+  // file_name = strtok_r(file_name, " ", &save_token_pointer);
+  // added this
+  f_name = malloc(strlen(file_name) + 1);
+  strlcpy(f_name, file_name, strlen(file_name) + 1);
+  f_name = strtok_r(f_name, " ", &save_token_pointer);
 
   /* Create a new thread to execute FILE_NAME. */
-  tid = thread_create (file_name, PRI_DEFAULT, start_process, fn_copy);
+  tid = thread_create (f_name, PRI_DEFAULT, start_process, fn_copy);
   if (tid == TID_ERROR)
     palloc_free_page (fn_copy); 
   return tid;
@@ -96,10 +105,43 @@ start_process (void *file_name_)
 int
 process_wait (tid_t child_tid) 
 {
-  // temp implementation
-  while(true) {
-    thread_yield();
+  // temp implementation need infinite loop here
+  // while(true) {
+  //   thread_yield();
+  // }
+
+  struct list_elem *element;
+  struct child *child = NULL;
+  struct list_elem *element_one = NULL;
+   for (element = list_begin(&thread_current()->child_proc); element != list_end(&thread_current()->child_proc); element = list_next(element))
+  {
+    struct child *f = list_entry (element, struct child, elem);
+    if(f->tid == child_tid)
+    {
+      child = f;
+      element_one = element;
+    }
   }
+
+  if(!child || !element_one) 
+  {
+    return -1;
+  }
+
+  thread_current()->waitingon = child->tid;
+  lock_acquire(&thread_current()->child_lock);
+  if(!child->have_used)
+  {
+    cond_wait(&thread_current()->child_cond, &thread_current()->child_lock);
+  }
+
+  lock_release(&thread_current()->child_lock);
+
+  int temporary_variable = child->exit_error;
+  
+  list_remove(element_one);
+
+  return temporary_variable;
 }
 
 /* Free the current process's resources. */
@@ -109,8 +151,14 @@ process_exit (void)
   struct thread *cur = thread_current ();
   uint32_t *pd;
 
-  int exit_code = 0;
+// changed this from exit_code = 0
+  int exit_code = cur->exit_error;
   printf("%s: exit(%d)\n",cur->name,exit_code);
+// added this; closes all files on process exit acquries the locks and then releases them
+  acquire_filesystem_lock();
+  file_close(thread_current()->self);
+  close_all_files(&thread_current()->files);
+  release_filesystem_lock();
 
   /* Destroy the current process's page directory and switch back
      to the kernel-only page directory. */
@@ -239,10 +287,12 @@ load (const char *file_name, void (**eip) (void), void **esp)
   /* Open executable file. */
   /*added this */
   char *file_name_copy = malloc (strlen(file_name) + 1); //makes space for the file name copy
-  strlcpy(file_name_copy, file_name, strlen(file_name)); //copies the file name into file name copy 
+  strlcpy(file_name_copy, file_name, strlen(file_name) + 1); //copies the file name into file name copy 
 
   char * save_pointer; // saved pointer variable initialization
   file_name_copy = strtok_r(file_name_copy, " ", &save_pointer); // strips the takens from file_name_copy and puts it into the saved pointer
+  acquire_filesystem_lock();
+
   file = filesys_open (file_name_copy); // use to call filesys_open on file_name now its file_name_copy
 
 
@@ -333,9 +383,15 @@ load (const char *file_name, void (**eip) (void), void **esp)
 
   success = true;
 
+  //added this
+  file_deny_write(file);
+  thread_current()->self = file;
+
  done:
   /* We arrive here whether the load is successful or not. */
-  file_close (file);
+  // file_close (file);
+  // removed above and added a release lock
+  release_filesystem_lock();
   return success;
 }
 
@@ -473,7 +529,7 @@ setup_stack (void **esp, char * file_name) // added file_name here as well
   char *save_token_pointer; //added this
   int arg_constant = 0,x; //added this: variable declaration and initialization for compiler
   char * file_name_copy = malloc(strlen(file_name) + 1); //added this: makes space for filename copy
-  strlcpy(file_name_copy, file_name, strlen(file_name)); //added this: copies file_name into file_name_copy
+  strlcpy(file_name_copy, file_name, strlen(file_name) + 1); //added this: copies file_name into file_name_copy
 
   // added this for loop. loops through each token and increments the arg per token
   for (token = strtok_r(file_name, " ", &save_token_pointer); token != NULL; token = strtok_r(NULL, " ", &save_token_pointer))
@@ -488,7 +544,6 @@ setup_stack (void **esp, char * file_name) // added file_name here as well
   {
     *esp -= strlen(token) + 1; //decrement here bc stack
     memcpy(*esp, token, strlen(token) + 1); //copies the length of tokens plus one from the token memory area to the interrupted threads area
-    hex_dump(*esp, *esp, PHYS_BASE-(*esp), true); /* Prints files specified on command line to the console in hex. */
     arg_var[i] = *esp;
   }
 
@@ -521,7 +576,6 @@ setup_stack (void **esp, char * file_name) // added file_name here as well
   *esp -= sizeof(int);
   memcpy(*esp, &zero_mem, sizeof(int)); //copies the size of int from the memory area of the zero_mem to the interrupted threads
 
-  hex_dump(*esp, *esp, PHYS_BASE - (*esp), true);  /* Prints files specified on command line to the console in hex. */
 
   return success;
 }
