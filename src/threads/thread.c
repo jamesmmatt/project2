@@ -482,8 +482,8 @@ init_thread (struct thread *t, const char *name, int priority)
   // fd is file descriptor
   t->fd_count = 2;
   /*added this section of child thread inits */
-  lock_init(&t->child_lock);
-  cond_init(&t->child_cond);
+  t->exit_error = -100;
+  sema_init(&t->child_lock, 0);
   t->waitingon = 0;
   t->self = NULL;
   list_push_back (&all_list, &t->allelem);

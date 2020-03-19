@@ -4,6 +4,7 @@
 #include "threads/interrupt.h"
 #include "threads/thread.h"
 #include "threads/vaddr.h" //virtual address
+#include "list.h"
 #include "process.h"
 
 static void syscall_handler (struct intr_frame *);
@@ -11,6 +12,7 @@ void* check_address(const void*);
 struct proc_file* search_from_list(struct list* files, int fd);
 extern bool is_running;
 
+// added this
 struct proc_file {
   struct list_elem elem;
   int fd;
@@ -27,13 +29,14 @@ static void syscall_handler (struct intr_frame *f UNUSED)
 //  added this: and switch statement
   int * pointer = f->esp;
   check_address(pointer);
+  int system_call = * pointer;
 
-	switch (*(int*)f->esp)
+	switch (system_call)
 	{
     /* Terminates pintos w/shutdown_power_off (from theads/init.h). Barely used, possible deadlock situations so could lose information */
 		case SYS_HALT:
       shutdown_power_off();
-      break;
+    break;
 
     /*Terminates the current user program, returing status to the kernel. if the process's parent waits for it
       this is the status that will be returned. a status of 0 indicates success and nonzero values indicate erros */
@@ -129,7 +132,7 @@ static void syscall_handler (struct intr_frame *f UNUSED)
         else
         {
           acquire_filesystem_lock();
-          f->eax = file_read(file_pointer->pointer, *(pointer + 6), *(pointer + 7), 0);
+          f->eax = file_read(file_pointer->pointer, *(pointer + 6), *(pointer + 7));
           release_filesystem_lock();
         }
       }
@@ -141,7 +144,7 @@ static void syscall_handler (struct intr_frame *f UNUSED)
       and get the actual number writte, or 0 if no bytes could be written at all
       writes all of the bufer in one call with putbuf(). */  
 		case SYS_WRITE:
-    check_address(pointer + 6);
+    check_address(pointer + 7);
     check_address(*(pointer + 6));
 		if(*(pointer + 5) == 1)
 		{
@@ -156,7 +159,7 @@ static void syscall_handler (struct intr_frame *f UNUSED)
 			else
       {
         acquire_filesystem_lock();
-				f->eax = file_write(file_pointer->pointer, *(pointer + 6), *(pointer + 7), 0);
+				f->eax = file_write(file_pointer->pointer, *(pointer + 6), *(pointer + 7));
         release_filesystem_lock();
       }
 		}
@@ -192,13 +195,14 @@ static void syscall_handler (struct intr_frame *f UNUSED)
 // where we utilize vaddr
 void* check_address(const void *vaddr)
 {
-	void *pointer = pagedir_get_page(thread_current()->pagedir, vaddr);
 
 	if (!is_user_vaddr( vaddr ))
 	{
     exit_proc(-1);
 		return 0;
 	}
+
+	void *pointer = pagedir_get_page(thread_current()->pagedir, vaddr);
 
 	if (!pointer)
 	{
@@ -229,9 +233,11 @@ void close_file(struct list* files, int fd)
 
 	struct list_elem *element;
 
+  struct proc_file *file;
+
   for (element = list_begin(files); element != list_end(files); element = list_next(element))
   {
-    struct proc_file *file = list_entry (element, struct proc_file, elem);
+    file = list_entry (element, struct proc_file, elem);
     if(file->fd == fd)
     {
       file_close(file->pointer);
@@ -245,12 +251,14 @@ void close_all_files(struct list* files)
 
 	struct list_elem *element;
 
-  for (element = list_begin(files); element != list_end(files); element = list_next(element))
+  while(!list_empty(files))
   {
-    struct proc_file *file = list_entry (element, struct proc_file, elem);
+    element = list_pop_front(files);
 
+    struct proc_file *file = list_entry(element, struct proc_file, elem);
     file_close(file->pointer);
     list_remove(element);
+    free(file);
   }
 } 
 
@@ -293,11 +301,9 @@ void exit_proc(int status)
     }
 
 	thread_current()->exit_error = status;
-	lock_acquire(&thread_current()->parent_thread->child_lock);
 
 	if(thread_current()->parent_thread->waitingon == thread_current()->tid)
-		cond_signal(&thread_current()->parent_thread->child_cond,&thread_current()->parent_thread->child_lock);
+		sema_up(&thread_current()->parent_thread->child_lock);
 
-	lock_release(&thread_current()->parent_thread->child_lock);
 	thread_exit();
 }

@@ -105,6 +105,7 @@ struct thread
     int exit_error;                     /*the exit error */
     struct list files;                  /* list of files */
     int fd_count;                       /*the file discriptor coutner */
+    struct semaphore child_lock;
 
 
     /* Shared between thread.c and synch.c. */

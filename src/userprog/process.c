@@ -59,6 +59,12 @@ process_execute (const char *file_name)
   tid = thread_create (f_name, PRI_DEFAULT, start_process, fn_copy);
   if (tid == TID_ERROR)
     palloc_free_page (fn_copy); 
+
+    sema_down(&thread_current()->child_lock);
+
+  if(!thread_current()->success)
+    return -1;
+
   return tid;
 }
 
@@ -81,7 +87,16 @@ start_process (void *file_name_)
   /* If load failed, quit. */
   palloc_free_page (file_name);
   if (!success) 
+  {
+    thread_current()->parent_thread->success = false;
+    sema_up(&thread_current()->parent_thread->child_lock);
     thread_exit ();
+  }
+  else 
+  {
+    thread_current()->parent_thread->success = true;
+    sema_up(&thread_current()->parent_thread->child_lock);
+  }
 
   /* Start the user process by simulating a return from an
      interrupt, implemented by intr_exit (in
@@ -129,13 +144,11 @@ process_wait (tid_t child_tid)
   }
 
   thread_current()->waitingon = child->tid;
-  lock_acquire(&thread_current()->child_lock);
+
   if(!child->have_used)
   {
-    cond_wait(&thread_current()->child_cond, &thread_current()->child_lock);
+    sema_down(&thread_current()->child_lock);
   }
-
-  lock_release(&thread_current()->child_lock);
 
   int temporary_variable = child->exit_error;
   
@@ -150,6 +163,11 @@ process_exit (void)
 {
   struct thread *cur = thread_current ();
   uint32_t *pd;
+
+  if(cur->exit_error == -100)
+  {
+    exit_proc(-1);
+  }
 
 // changed this from exit_code = 0
   int exit_code = cur->exit_error;
@@ -278,6 +296,7 @@ load (const char *file_name, void (**eip) (void), void **esp)
   bool success = false;
   int i;
 
+  acquire_filesystem_lock();
   /* Allocate and activate page directory. */
   t->pagedir = pagedir_create ();
   if (t->pagedir == NULL) 
@@ -291,10 +310,10 @@ load (const char *file_name, void (**eip) (void), void **esp)
 
   char * save_pointer; // saved pointer variable initialization
   file_name_copy = strtok_r(file_name_copy, " ", &save_pointer); // strips the takens from file_name_copy and puts it into the saved pointer
-  acquire_filesystem_lock();
 
   file = filesys_open (file_name_copy); // use to call filesys_open on file_name now its file_name_copy
 
+  free(file_name_copy);
 
   if (file == NULL) 
     {
@@ -569,13 +588,15 @@ setup_stack (void **esp, char * file_name) // added file_name here as well
 
 
   int pt = *esp;
-  *esp-=sizeof(int);
+  *esp -= sizeof(int);
   memcpy(*esp, &pt , sizeof(int));
   *esp -= sizeof(int);
   memcpy(*esp , &arg_constant , sizeof(int)); //copies the size of int from the memory area of the constant arg to the interrupted threads
   *esp -= sizeof(int);
   memcpy(*esp, &zero_mem, sizeof(int)); //copies the size of int from the memory area of the zero_mem to the interrupted threads
 
+  free(file_name_copy);
+  free(arg_var);
 
   return success;
 }
